@@ -41,11 +41,10 @@ def fetch_articles_from_rss(category):
                 if count >= MAX_ARTICLES:
                     break
 
-                title = entry.title if 'title' in entry else ""
-                summary = entry.summary if 'summary' in entry else ""
-                link = entry.link if 'link' in entry else ""
+                title = entry.get('title', '')
+                summary = entry.get('summary', '')
+                link = entry.get('link', '')
 
-                # Parse published date
                 try:
                     published = datetime(*entry.published_parsed[:6])
                 except:
@@ -54,27 +53,25 @@ def fetch_articles_from_rss(category):
                 if published < one_week_ago:
                     continue
 
-                if not contains_ai_keywords(title + " " + summary):
+                if not contains_ai_keywords(f"{title} {summary}"):
                     continue
 
                 if session.query(ScrapedArticle).filter_by(url=link).first():
                     continue
 
-                # Download full article content if passed filters
                 try:
                     article = Article(link)
                     article.download()
                     article.parse()
                     text = article.text or ""
-                    if len(text.split()) < 300:
+                    if len(text.split()) < 300 or not contains_ai_keywords(text):
                         continue
                 except:
                     continue
 
-                # Save to DB
                 new_article = ScrapedArticle(
                     category=category,
-                    title=article.title.strip(),
+                    title=article.title.strip() or title,
                     url=link,
                     summary=text[:1000],
                     published_at=published
@@ -91,6 +88,5 @@ def fetch_articles_from_rss(category):
     session.close()
     print(f"\n✅ {category}: {new_count} Gen AI articles saved.")
 
-# Example usage
 if __name__ == "__main__":
     fetch_articles_from_rss("CurrentTrends")
