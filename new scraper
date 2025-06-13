@@ -1,0 +1,89 @@
+from newspaper import Article, build
+from datetime import datetime, timedelta
+from db_setup import ScrapedArticle, Session
+from config import RSS_URLS
+
+# Max articles per website
+MAX_ARTICLES = 15
+
+# Time threshold
+now = datetime.now()
+one_week_ago = now - timedelta(days=7)
+
+# Keywords to match
+AI_KEYWORDS = [
+    "AI", "GEN AI", "artificial intelligence", "LLM", "chatbot",
+    "GPT", "Prompt", "Fine-Tuning", "Tokens"
+]
+
+def contains_ai_keywords(text):
+    if not text:
+        return False
+    text = text.lower()
+    return any(keyword.lower() in text for keyword in AI_KEYWORDS)
+
+def fetch_articles(category):
+    session = Session()
+    new_count = 0
+
+    urls = RSS_URLS.get(category, [])
+    if not urls:
+        print(f"❌ No URLs found for category: {category}")
+        return
+
+    for site_url in urls:
+        try:
+            paper = build(site_url, memoize_articles=False)
+            print(f"🔍 {len(paper.articles)} total articles at {site_url}")
+            count = 0
+
+            for content in paper.articles:
+                if count >= MAX_ARTICLES:
+                    break
+
+                try:
+                    content.download()
+                    content.parse()
+
+                    published = content.publish_date or now
+                    if published < one_week_ago:
+                        print(f"⏳ Skipped old: {content.url}")
+                        continue
+
+                    if session.query(ScrapedArticle).filter_by(url=content.url).first():
+                        print(f"⚠️ Already exists: {content.url}")
+                        continue
+
+                    title = content.title or ""
+                    text = content.text or ""
+
+                    if not contains_ai_keywords(title + " " + text):
+                        print(f"🚫 No AI keywords: {content.url}")
+                        continue
+
+                    article = ScrapedArticle(
+                        category=category,
+                        title=title if title else "No Title",
+                        url=content.url,
+                        summary=text[:1000] if text else "No Content",
+                        published_at=published
+                    )
+
+                    session.add(article)
+                    new_count += 1
+                    count += 1
+                    print(f"✅ Added: {content.url}")
+
+                except Exception as e:
+                    print(f"❌ Error scraping: {content.url}\n{e}")
+
+        except Exception as e:
+            print(f"❌ Failed loading site: {site_url}\n{e}")
+
+    session.commit()
+    session.close()
+    print(f"\n✅ {category}: {new_count} new AI-related articles scraped.")
+
+# Example usage
+if __name__ == "__main__":
+    fetch_articles("CurrentTrends")
