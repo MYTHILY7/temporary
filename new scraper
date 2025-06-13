@@ -3,24 +3,24 @@ from datetime import datetime, timedelta
 from db_setup import ScrapedArticle, Session
 from config import RSS_URLS
 
-# Max articles per website
 MAX_ARTICLES = 15
-
-# Time threshold
 now = datetime.now()
 one_week_ago = now - timedelta(days=7)
 
-# Keywords to match
+# Expanded Gen AI keyword list
 AI_KEYWORDS = [
-    "AI", "GEN AI", "artificial intelligence", "LLM", "chatbot",
-    "GPT", "Prompt", "Fine-Tuning", "Tokens"
+    "ai", "gen ai", "generative ai", "gpt", "llm", "chatbot", "prompt", "prompt engineering",
+    "fine-tuning", "tokens", "transformer", "autoregressive", "openai", "embedding",
+    "instruction tuning", "langchain", "huggingface", "model alignment", "vector database",
+    "agentic", "autogen", "multi-modal", "rlhf", "text-to-image", "text-to-speech", "codex", 
+    "palm", "mistral", "claude", "cohere", "anthropic", "context window", "rag", "semantic search"
 ]
 
-def contains_ai_keywords(text):
+def contains_ai_keywords(text, min_hits=2):
     if not text:
         return False
     text = text.lower()
-    return any(keyword.lower() in text for keyword in AI_KEYWORDS)
+    return sum(1 for keyword in AI_KEYWORDS if keyword.lower() in text) >= min_hits
 
 def fetch_articles(category):
     session = Session()
@@ -34,7 +34,7 @@ def fetch_articles(category):
     for site_url in urls:
         try:
             paper = build(site_url, memoize_articles=False)
-            print(f"🔍 {len(paper.articles)} total articles at {site_url}")
+            print(f"🔍 Checking {len(paper.articles)} articles at {site_url}")
             count = 0
 
             for content in paper.articles:
@@ -47,42 +47,46 @@ def fetch_articles(category):
 
                     published = content.publish_date or now
                     if published < one_week_ago:
-                        print(f"⏳ Skipped old: {content.url}")
+                        print(f"⏳ Skipped (old): {content.url}")
                         continue
 
                     if session.query(ScrapedArticle).filter_by(url=content.url).first():
-                        print(f"⚠️ Already exists: {content.url}")
+                        print(f"⚠️ Already in DB: {content.url}")
                         continue
 
                     title = content.title or ""
                     text = content.text or ""
 
+                    if len(text.split()) < 300:
+                        print(f"🚫 Too short (<300 words): {content.url}")
+                        continue
+
                     if not contains_ai_keywords(title + " " + text):
-                        print(f"🚫 No AI keywords: {content.url}")
+                        print(f"🚫 No AI relevance: {content.url}")
                         continue
 
                     article = ScrapedArticle(
                         category=category,
-                        title=title if title else "No Title",
+                        title=title.strip(),
                         url=content.url,
-                        summary=text[:1000] if text else "No Content",
+                        summary=text[:1000],
                         published_at=published
                     )
 
                     session.add(article)
-                    new_count += 1
                     count += 1
+                    new_count += 1
                     print(f"✅ Added: {content.url}")
 
                 except Exception as e:
                     print(f"❌ Error scraping: {content.url}\n{e}")
 
         except Exception as e:
-            print(f"❌ Failed loading site: {site_url}\n{e}")
+            print(f"❌ Error accessing site: {site_url}\n{e}")
 
     session.commit()
     session.close()
-    print(f"\n✅ {category}: {new_count} new AI-related articles scraped.")
+    print(f"\n✅ {category}: {new_count} new Gen AI–focused articles scraped.")
 
 # Example usage
 if __name__ == "__main__":
