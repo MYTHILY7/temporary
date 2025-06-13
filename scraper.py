@@ -18,11 +18,12 @@ RSS_URLS = {
         'https://www.futurepedia.io/rss.xml'
     ],
     'UseCases': [
-        'https://www.ibm.com/blogs/research/feed/',
-        'https://hai.stanford.edu/news/feed',
-        'https://www.mckinsey.com/feeds/quantumblack',
-        'https://research.aimultiple.com/feed/',
-        'https://usecasesfor.ai/feed/',
-        'https://www.cio.com/wp-content/themes/idgtheme-2021/json/feed/ai',  # or general CIO feed
-    ]
+    'https://www.analyticsvidhya.com/blog/tag/use-case/feed/',
+    'https://www.marktechpost.com/category/ai/feed/',
+    'https://venturebeat.com/category/ai/feed/',
+    'https://www.infoq.com/ai-ml/news/rss.xml',
+    'https://www.aitimejournal.com/feed/',
+    'https://builtin.com/rss-feed/technology',
+    'https://aibusiness.com/feed',  # Good for real-world use case examples
+]
 }
