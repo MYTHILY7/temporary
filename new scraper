@@ -1,8 +1,8 @@
 from newspaper import Article, build
 from datetime import datetime, timedelta
 from db_setup import ScrapedArticle, Session
+from config import WEBSITE_URLS
 
-# Keywords for filtering
 AI_KEYWORDS = [
     "ai", "gen ai", "generative ai", "gpt", "llm", "chatbot", "prompt", "prompt engineering",
     "fine-tuning", "tokens", "transformer", "autoregressive", "openai", "embedding",
@@ -34,24 +34,19 @@ def fetch_articles_from_website(url, category):
             article.download()
             article.parse()
 
-            # Filter by keywords
             if not contains_ai_keywords(article.title + " " + article.text):
                 continue
 
-            # Filter by word count
             if len(article.text.split()) < 300:
                 continue
 
-            # Filter by published date
             published = article.publish_date or now
             if published < one_week_ago:
                 continue
 
-            # Avoid duplicates
             if session.query(ScrapedArticle).filter_by(url=article.url).first():
                 continue
 
-            # Save to DB
             new_article = ScrapedArticle(
                 category=category,
                 title=article.title.strip(),
@@ -63,13 +58,17 @@ def fetch_articles_from_website(url, category):
             saved += 1
             print(f"✅ Saved: {article.title}")
 
-        except Exception as e:
+        except Exception:
             continue
 
     session.commit()
     session.close()
     print(f"🔍 Done: {saved} articles saved from {url}")
 
-# Example
+def fetch_articles():
+    for category, urls in WEBSITE_URLS.items():
+        for url in urls:
+            fetch_articles_from_website(url, category)
+
 if __name__ == "__main__":
-    fetch_articles_from_website("https://www.bbc.com", "CurrentTrends")
+    fetch_articles()
