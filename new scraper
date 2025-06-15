@@ -1,4 +1,6 @@
-from newspaper import Article, build
+# scraper.py
+import newspaper
+from newspaper import Article
 from datetime import datetime, timedelta
 from db_setup import ScrapedArticle, Session
 from config import WEBSITE_URLS
@@ -11,9 +13,11 @@ AI_KEYWORDS = [
     "palm", "mistral", "claude", "cohere", "anthropic", "context window", "rag", "semantic search"
 ]
 
-MAX_ARTICLES = 10
-now = datetime.now()
+now = datetime.utcnow()
 one_week_ago = now - timedelta(days=7)
+
+MAX_ARTICLES = 10
+
 
 def contains_ai_keywords(text, min_hits=2):
     if not text:
@@ -21,54 +25,63 @@ def contains_ai_keywords(text, min_hits=2):
     text = text.lower()
     return sum(1 for keyword in AI_KEYWORDS if keyword in text) >= min_hits
 
-def fetch_articles_from_website(url, category):
-    print(f"\n🌐 Visiting: {url}")
-    paper = build(url, memoize_articles=False)
+
+def fetch_articles(category):
     session = Session()
-    saved = 0
+    urls = WEBSITE_URLS.get(category, [])
+    new_count = 0
 
-    for article in paper.articles:
-        if saved >= MAX_ARTICLES:
-            break
+    if not urls:
+        print(f"❌ No website URLs found for category: {category}")
+        return
+
+    print(f"🔎 Scraping category: {category} ({len(urls)} websites)")
+
+    for site_url in urls:
         try:
-            article.download()
-            article.parse()
+            paper = newspaper.build(site_url, memoize_articles=False)
+            count = 0
+            print(f"🌐 Site: {site_url} ({len(paper.articles)} articles)")
 
-            if not contains_ai_keywords(article.title + " " + article.text):
-                continue
+            for article in paper.articles:
+                if count >= MAX_ARTICLES:
+                    break
+                try:
+                    article.download()
+                    article.parse()
+                    article.nlp()
+                except:
+                    continue
 
-            if len(article.text.split()) < 300:
-                continue
+                title = article.title or ""
+                text = article.text or ""
+                url = article.url or ""
+                publish_date = article.publish_date or now
 
-            published = article.publish_date or now
-            if published < one_week_ago:
-                continue
+                if publish_date < one_week_ago:
+                    continue
 
-            if session.query(ScrapedArticle).filter_by(url=article.url).first():
-                continue
+                if not contains_ai_keywords(title + " " + text):
+                    continue
 
-            new_article = ScrapedArticle(
-                category=category,
-                title=article.title.strip(),
-                url=article.url,
-                summary=article.text[:1000],
-                published_at=published
-            )
-            session.add(new_article)
-            saved += 1
-            print(f"✅ Saved: {article.title}")
+                if session.query(ScrapedArticle).filter_by(url=url).first():
+                    continue
 
-        except Exception:
-            continue
+                new_article = ScrapedArticle(
+                    category=category,
+                    title=title.strip(),
+                    url=url,
+                    summary=text[:1000],
+                    published_at=publish_date
+                )
+                session.add(new_article)
+                count += 1
+                new_count += 1
+                print(f"✅ Saved: {title}")
+
+        except Exception as e:
+            print(f"❌ Failed to scrape {site_url}: {e}")
 
     session.commit()
     session.close()
-    print(f"🔍 Done: {saved} articles saved from {url}")
-
-def fetch_articles():
-    for category, urls in WEBSITE_URLS.items():
-        for url in urls:
-            fetch_articles_from_website(url, category)
-
-if __name__ == "__main__":
-    fetch_articles()
+    print(f"\n✅ {category}: {new_count} Gen AI articles saved.\n")
