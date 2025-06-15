@@ -1,13 +1,8 @@
-import feedparser
-from newspaper import Article
+from newspaper import Article, build
 from datetime import datetime, timedelta
 from db_setup import ScrapedArticle, Session
-from config import RSS_URLS
 
-now = datetime.now()
-one_week_ago = now - timedelta(days=7)
-MAX_ARTICLES = 15
-
+# Keywords for filtering
 AI_KEYWORDS = [
     "ai", "gen ai", "generative ai", "gpt", "llm", "chatbot", "prompt", "prompt engineering",
     "fine-tuning", "tokens", "transformer", "autoregressive", "openai", "embedding",
@@ -16,77 +11,65 @@ AI_KEYWORDS = [
     "palm", "mistral", "claude", "cohere", "anthropic", "context window", "rag", "semantic search"
 ]
 
+MAX_ARTICLES = 10
+now = datetime.now()
+one_week_ago = now - timedelta(days=7)
+
 def contains_ai_keywords(text, min_hits=2):
     if not text:
         return False
     text = text.lower()
     return sum(1 for keyword in AI_KEYWORDS if keyword in text) >= min_hits
 
-def fetch_articles_from_rss(category):
+def fetch_articles_from_website(url, category):
+    print(f"\n🌐 Visiting: {url}")
+    paper = build(url, memoize_articles=False)
     session = Session()
-    new_count = 0
-    urls = RSS_URLS.get(category, [])
+    saved = 0
 
-    if not urls:
-        print(f"❌ No RSS URLs found for category: {category}")
-        return
-
-    for rss_url in urls:
+    for article in paper.articles:
+        if saved >= MAX_ARTICLES:
+            break
         try:
-            feed = feedparser.parse(rss_url)
-            print(f"\n📡 Reading feed: {rss_url} ({len(feed.entries)} items)")
-            count = 0
+            article.download()
+            article.parse()
 
-            for entry in feed.entries:
-                if count >= MAX_ARTICLES:
-                    break
+            # Filter by keywords
+            if not contains_ai_keywords(article.title + " " + article.text):
+                continue
 
-                title = entry.get('title', '')
-                summary = entry.get('summary', '')
-                link = entry.get('link', '')
+            # Filter by word count
+            if len(article.text.split()) < 300:
+                continue
 
-                try:
-                    published = datetime(*entry.published_parsed[:6])
-                except:
-                    published = now
+            # Filter by published date
+            published = article.publish_date or now
+            if published < one_week_ago:
+                continue
 
-                if published < one_week_ago:
-                    continue
+            # Avoid duplicates
+            if session.query(ScrapedArticle).filter_by(url=article.url).first():
+                continue
 
-                if not contains_ai_keywords(f"{title} {summary}"):
-                    continue
-
-                if session.query(ScrapedArticle).filter_by(url=link).first():
-                    continue
-
-                try:
-                    article = Article(link)
-                    article.download()
-                    article.parse()
-                    text = article.text or ""
-                    if len(text.split()) < 300 or not contains_ai_keywords(text):
-                        continue
-                except:
-                    continue
-
-                new_article = ScrapedArticle(
-                    category=category,
-                    title=article.title.strip() or title,
-                    url=link,
-                    summary=text[:1000],
-                    published_at=published
-                )
-                session.add(new_article)
-                count += 1
-                new_count += 1
-                print(f"✅ {title}")
+            # Save to DB
+            new_article = ScrapedArticle(
+                category=category,
+                title=article.title.strip(),
+                url=article.url,
+                summary=article.text[:1000],
+                published_at=published
+            )
+            session.add(new_article)
+            saved += 1
+            print(f"✅ Saved: {article.title}")
 
         except Exception as e:
-            print(f"❌ Failed RSS feed: {rss_url}\n{e}")
+            continue
 
     session.commit()
     session.close()
-    print(f"\n✅ {category}: {new_count} Gen AI articles saved.")
+    print(f"🔍 Done: {saved} articles saved from {url}")
 
+# Example
 if __name__ == "__main__":
-    fetch_articles_from_rss("CurrentTrends")
+    fetch_articles_from_website("https://www.bbc.com", "CurrentTrends")
