@@ -74,3 +74,13 @@ def fetch_articles(category):
 
 if __name__ == "__main__":
     fetch_articles("CurrentTrends")
+
+
+
+
+
+🌍 LearnTechnologies - Site: https://towardsdatascience.com/ (26 articles found)
+CRITICAL:newspaper.network:[REQUEST FAILED] 404 Client Error: Not Found for url: https://deepmind.google.com/
+CRITICAL:newspaper.network:[REQUEST FAILED] 404 Client Error: Not Found for url: https://deepmind.google/rss/
+CRITICAL:newspaper.network:[REQUEST FAILED] 404 Client Error: Not Found for url: https://deepmind.google/feeds/
+CRITICAL:newspaper.network:[REQUEST FAILED] 404 Client Error: Not Found for url: https://deepmind.google/feed/
