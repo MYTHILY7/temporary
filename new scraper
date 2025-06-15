@@ -1,84 +1,76 @@
 from newspaper import Article, build
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from db_setup import ScrapedArticle, Session
-from config import RSS_URLS  # You can rename this to WEBSITE_URLS if you've updated config.py
+from config import RSS_URLS
 
-MAX_ARTICLES = 15
-now = datetime.now()
+MAX_PER_SITE = 10
+now = datetime.now(timezone.utc)
 one_week_ago = now - timedelta(days=7)
 
 AI_KEYWORDS = [
-    "ai", "gen ai", "generative ai", "gpt", "llm", "chatbot", "prompt", "prompt engineering",
-    "fine-tuning", "tokens", "transformer", "autoregressive", "openai", "embedding",
-    "instruction tuning", "langchain", "huggingface", "model alignment", "vector database",
-    "agentic", "autogen", "multi-modal", "rlhf", "text-to-image", "text-to-speech", "codex", 
-    "palm", "mistral", "claude", "cohere", "anthropic", "context window", "rag", "semantic search"
+    "ai", "gen ai", "generative ai", "gpt", "llm", "chatbot", "prompt", "openai",
+    "langchain", "huggingface", "transformer", "fine-tuning", "embedding", "codex", 
+    "mistral", "claude", "anthropic", "cohere", "semantic search", "vector db", "rag"
 ]
 
-def contains_ai_keywords(text, min_hits=2):
-    if not text:
-        return False
+def has_ai_keywords(text):
     text = text.lower()
-    return sum(1 for keyword in AI_KEYWORDS if keyword in text) >= min_hits
+    return any(k in text for k in AI_KEYWORDS)
 
 def fetch_articles(category):
     session = Session()
-    new_count = 0
-
     urls = RSS_URLS.get(category, [])
-    if not urls:
-        print(f"❌ No URLs found for category: {category}")
-        return
+    added = 0
 
     for site_url in urls:
         try:
             paper = build(site_url, memoize_articles=False)
-            print(f"🔍 Checking {len(paper.articles)} articles at {site_url}")
-            count = 0
+            print(f"\n🌍 {category} - Site: {site_url} ({len(paper.articles)} articles found)")
 
-            for content in paper.articles:
-                if count >= MAX_ARTICLES:
-                    break
-
+            for article in paper.articles[:MAX_PER_SITE]:
                 try:
-                    content.download()
-                    content.parse()
+                    article.download()
+                    article.parse()
 
-                    published = content.publish_date or now
-                    if published < one_week_ago:
-                        print(f"⏳ Skipped (old): {content.url}")
+                    if article.meta_lang and article.meta_lang != "en":
+                        print(f"🌐 Skipped non-English: {article.url}")
                         continue
 
-                    if session.query(ScrapedArticle).filter_by(url=content.url).first():
-                        print(f"⚠️ Already in DB: {content.url}")
+                    published_at = article.publish_date
+                    if published_at and published_at.tzinfo is None:
+                        published_at = published_at.replace(tzinfo=timezone.utc)
+
+                    if published_at and published_at < one_week_ago:
                         continue
 
-                    title = content.title or ""
-                    text = content.text or ""
-
-                    if not contains_ai_keywords(title + " " + text):
-                        print(f"🚫 No AI relevance: {content.url}")
+                    if session.query(ScrapedArticle).filter_by(url=article.url).first():
                         continue
 
-                    article = ScrapedArticle(
+                    title = article.title or ""
+                    text = article.text or ""
+                    if not has_ai_keywords(title + " " + text):
+                        continue
+
+                    session.add(ScrapedArticle(
                         category=category,
                         title=title.strip(),
-                        url=content.url,
+                        url=article.url,
                         summary=text[:1000],
-                        published_at=published
-                    )
+                        published_at=published_at or now
+                    ))
 
-                    session.add(article)
-                    count += 1
-                    new_count += 1
-                    print(f"✅ Added: {content.url}")
+                    added += 1
+                    print(f"✅ Added: {title[:60]}")
 
                 except Exception as e:
-                    print(f"❌ Error scraping: {content.url}\n{e}")
+                    print(f"⚠️ Failed article: {e}")
 
         except Exception as e:
-            print(f"❌ Error accessing site: {site_url}\n{e}")
+            print(f"❌ Failed to build site {site_url}: {e}")
 
     session.commit()
     session.close()
-    print(f"\n✅ {category}: {new_count} new Gen AI–focused articles scraped.")
+    print(f"\n✅ {category} done — {added} new articles.")
+
+if __name__ == "__main__":
+    fetch_articles("CurrentTrends")
