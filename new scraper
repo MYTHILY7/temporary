@@ -1,9 +1,11 @@
-# scraper.py
-import newspaper
-from newspaper import Article
+from newspaper import Article, build
 from datetime import datetime, timedelta
 from db_setup import ScrapedArticle, Session
-from config import WEBSITE_URLS
+from config import RSS_URLS  # You can rename this to WEBSITE_URLS if you've updated config.py
+
+MAX_ARTICLES = 15
+now = datetime.now()
+one_week_ago = now - timedelta(days=7)
 
 AI_KEYWORDS = [
     "ai", "gen ai", "generative ai", "gpt", "llm", "chatbot", "prompt", "prompt engineering",
@@ -13,75 +15,70 @@ AI_KEYWORDS = [
     "palm", "mistral", "claude", "cohere", "anthropic", "context window", "rag", "semantic search"
 ]
 
-now = datetime.utcnow()
-one_week_ago = now - timedelta(days=7)
-
-MAX_ARTICLES = 10
-
-
 def contains_ai_keywords(text, min_hits=2):
     if not text:
         return False
     text = text.lower()
     return sum(1 for keyword in AI_KEYWORDS if keyword in text) >= min_hits
 
-
 def fetch_articles(category):
     session = Session()
-    urls = WEBSITE_URLS.get(category, [])
     new_count = 0
 
+    urls = RSS_URLS.get(category, [])
     if not urls:
-        print(f"❌ No website URLs found for category: {category}")
+        print(f"❌ No URLs found for category: {category}")
         return
-
-    print(f"🔎 Scraping category: {category} ({len(urls)} websites)")
 
     for site_url in urls:
         try:
-            paper = newspaper.build(site_url, memoize_articles=False)
+            paper = build(site_url, memoize_articles=False)
+            print(f"🔍 Checking {len(paper.articles)} articles at {site_url}")
             count = 0
-            print(f"🌐 Site: {site_url} ({len(paper.articles)} articles)")
 
-            for article in paper.articles:
+            for content in paper.articles:
                 if count >= MAX_ARTICLES:
                     break
+
                 try:
-                    article.download()
-                    article.parse()
-                    article.nlp()
-                except:
-                    continue
+                    content.download()
+                    content.parse()
 
-                title = article.title or ""
-                text = article.text or ""
-                url = article.url or ""
-                publish_date = article.publish_date or now
+                    published = content.publish_date or now
+                    if published < one_week_ago:
+                        print(f"⏳ Skipped (old): {content.url}")
+                        continue
 
-                if publish_date < one_week_ago:
-                    continue
+                    if session.query(ScrapedArticle).filter_by(url=content.url).first():
+                        print(f"⚠️ Already in DB: {content.url}")
+                        continue
 
-                if not contains_ai_keywords(title + " " + text):
-                    continue
+                    title = content.title or ""
+                    text = content.text or ""
 
-                if session.query(ScrapedArticle).filter_by(url=url).first():
-                    continue
+                    if not contains_ai_keywords(title + " " + text):
+                        print(f"🚫 No AI relevance: {content.url}")
+                        continue
 
-                new_article = ScrapedArticle(
-                    category=category,
-                    title=title.strip(),
-                    url=url,
-                    summary=text[:1000],
-                    published_at=publish_date
-                )
-                session.add(new_article)
-                count += 1
-                new_count += 1
-                print(f"✅ Saved: {title}")
+                    article = ScrapedArticle(
+                        category=category,
+                        title=title.strip(),
+                        url=content.url,
+                        summary=text[:1000],
+                        published_at=published
+                    )
+
+                    session.add(article)
+                    count += 1
+                    new_count += 1
+                    print(f"✅ Added: {content.url}")
+
+                except Exception as e:
+                    print(f"❌ Error scraping: {content.url}\n{e}")
 
         except Exception as e:
-            print(f"❌ Failed to scrape {site_url}: {e}")
+            print(f"❌ Error accessing site: {site_url}\n{e}")
 
     session.commit()
     session.close()
-    print(f"\n✅ {category}: {new_count} Gen AI articles saved.\n")
+    print(f"\n✅ {category}: {new_count} new Gen AI–focused articles scraped.")
